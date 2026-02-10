@@ -84,6 +84,32 @@ I hope you enjoy your Neovim journey,
 P.S. You can delete this when you're done too. It's your config now! :)
 --]]
 
+-- =====================================================================
+-- CUSTOM CONFIG NOTES
+-- =====================================================================
+--
+-- Font: Berkeley Mono (no Nerd Fonts) -- set have_nerd_font = false
+-- Theme: monoglow (dark, default) / ef-themes (light, via :colorscheme ef-spring)
+-- Style: which-key uses 'helix' preset for popup layout
+--
+-- GOTCHA: This config uses lspconfig (require('lspconfig')) for LSP setup,
+-- NOT the newer vim.lsp.config/vim.lsp.enable API. The newer API ships with
+-- Neovim 0.12+ (currently nightly). We use lspconfig because it provides
+-- default cmd, filetypes, and root_dir detection for each server.
+--
+-- GOTCHA: Mason package names use hyphens (e.g. 'rust-analyzer'), but
+-- lspconfig server names use underscores (e.g. 'rust_analyzer'). The
+-- `servers` table uses lspconfig names, and `ensure_installed` uses mason names.
+-- These are TWO DIFFERENT registries -- don't mix them up.
+--
+-- GOTCHA: Your shell's git must support 'git submodule'. Zed.app bundles a
+-- minimal git that doesn't. Make sure /opt/homebrew/bin or /usr/bin comes
+-- first in your PATH (see nushell env.nu).
+--
+-- Custom plugins live in lua/custom/plugins/*.lua and are auto-loaded
+-- via { import = 'custom.plugins' } at the bottom of this file.
+-- See KEYMAPS.md for a full keybinding reference.
+
 -- Set <space> as the leader key
 -- See `:help mapleader`
 --  NOTE: Must happen before plugins are loaded (otherwise wrong leader will be used)
@@ -100,9 +126,7 @@ vim.g.have_nerd_font = false
 
 -- Make line numbers default
 vim.o.number = true
--- You can also add relative line numbers, to help with jumping.
---  Experiment for yourself to see if you like it!
--- vim.o.relativenumber = true
+vim.o.relativenumber = true
 
 -- Enable mouse mode, can be useful for resizing splits for example!
 vim.o.mouse = 'a'
@@ -164,6 +188,17 @@ vim.o.scrolloff = 10
 -- See `:help 'confirm'`
 vim.o.confirm = true
 
+-- GOTCHA: autoread makes vim reload files changed outside the editor (needed for opencode.nvim
+-- to pick up AI-edited files). It does NOT auto-reload on its own -- it checks on focus/command.
+vim.o.autoread = true
+
+-- Font for GUI Neovim clients (Neovide, etc.). Has no effect in terminal Neovim.
+-- Your terminal emulator (Ghostty, etc.) controls the font in terminal mode.
+vim.o.guifont = 'Berkeley Mono:h14'
+
+-- Required for colorschemes to display correctly in modern terminals.
+vim.o.termguicolors = true
+
 -- [[ Basic Keymaps ]]
 --  See `:help vim.keymap.set()`
 
@@ -180,8 +215,8 @@ vim.diagnostic.config {
   underline = { severity = vim.diagnostic.severity.ERROR },
 
   -- Can switch between these as you prefer
-  virtual_text = true, -- Text shows up at the end of the line
-  virtual_lines = false, -- Teest shows up underneath the line, with virtual lines
+  virtual_text = false,
+  virtual_lines = true,
 
   -- Auto open the float, so you can easily read the errors when jumping with `[d` and `]d`
   jump = { float = true },
@@ -304,15 +339,17 @@ require('lazy').setup({
     'folke/which-key.nvim',
     event = 'VimEnter',
     opts = {
-      -- delay between pressing a key and opening which-key (milliseconds)
+      preset = 'helix',
       delay = 0,
-      icons = { mappings = vim.g.have_nerd_font },
+      icons = { mappings = false },
 
-      -- Document existing key chains
       spec = {
         { '<leader>s', group = '[S]earch', mode = { 'n', 'v' } },
         { '<leader>t', group = '[T]oggle' },
         { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } },
+        { '<leader>g', group = '[G]it' },
+        { '<leader>f', group = '[F]ind' },
+        { '<leader>u', group = '[U]I toggles' },
       },
     },
   },
@@ -589,46 +626,102 @@ require('lazy').setup({
       --  So, we create new capabilities with blink.cmp, and then broadcast that to the servers.
       local capabilities = require('blink.cmp').get_lsp_capabilities()
 
-      -- Enable the following language servers
-      --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
-      --  See `:help lsp-config` for information about keys and how to configure
+      -- LSP servers to enable. Keys are lspconfig names (underscores).
+      -- Pass {} for defaults, or a table to override settings.
+      -- Each server gets auto-configured with blink.cmp capabilities.
+      --
+      -- GOTCHA: Adding a server here doesn't install it -- you must also add
+      -- the mason package name (hyphens) to ensure_installed below.
+      --
+      -- To add a new language:
+      --   1. Add lspconfig name here (e.g. pyright = {})
+      --   2. Add mason name to ensure_installed (e.g. 'pyright')
+      --   3. Add treesitter parser to ensure_installed in treesitter config
+      --   4. Optionally add formatter in conform.nvim formatters_by_ft
       local servers = {
-        -- clangd = {},
-        -- gopls = {},
-        -- pyright = {},
-        -- rust_analyzer = {},
-        --
-        -- Some languages (like typescript) have entire language plugins that can be useful:
-        --    https://github.com/pmizio/typescript-tools.nvim
-        --
-        -- But for many setups, the LSP (`ts_ls`) will work just fine
-        -- ts_ls = {},
+        ts_ls = {},       -- TypeScript/JavaScript (fallback, toggled off when tsgo is active)
+        gopls = {},       -- Go
+        rust_analyzer = {},-- Rust
+        eslint = {},      -- ESLint (reads your project's eslint.config.mjs automatically)
+        tailwindcss = {}, -- Tailwind CSS class completions (needs tailwind.config.js in project)
+        biome = {},       -- Biome linter/formatter (reads biome.jsonc automatically, used by ~/c/apex)
       }
 
-      -- Ensure the servers and tools above are installed
-      --
-      -- To check the current status of installed tools and/or manually install
-      -- other tools, you can run
-      --    :Mason
-      --
-      -- You can press `g?` for help in this menu.
-      local ensure_installed = vim.tbl_keys(servers or {})
-      vim.list_extend(ensure_installed, {
-        'lua_ls', -- Lua Language server
-        'stylua', -- Used to format Lua code
-        -- You can add other tools here that you want Mason to install
-      })
+      -- Mason package names (hyphens, NOT lspconfig names with underscores).
+      -- Mason auto-installs these on first launch. Run :Mason to check status.
+      -- GOTCHA: We list these explicitly instead of deriving from the servers
+      -- table because mason and lspconfig use different naming conventions
+      -- (e.g. rust-analyzer vs rust_analyzer).
+      local ensure_installed = {
+        'lua-language-server',           -- lua_ls
+        'typescript-language-server',    -- ts_ls
+        'gopls',                         -- gopls (same name in both)
+        'rust-analyzer',                 -- rust_analyzer
+        'eslint-lsp',                    -- eslint
+        'tailwindcss-language-server',   -- tailwindcss
+        'biome',                         -- biome (same name in both)
+        'stylua',                        -- Lua formatter
+        'prettierd',                     -- JS/TS/CSS formatter (daemon, faster than prettier)
+        'goimports',                     -- Go import organizer + formatter
+      }
 
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
-      for name, server in pairs(servers) do
-        server.capabilities = vim.tbl_deep_extend('force', {}, capabilities, server.capabilities or {})
-        vim.lsp.config(name, server)
-        vim.lsp.enable(name)
+      -- GOTCHA: We use lspconfig[name].setup() instead of vim.lsp.config()/vim.lsp.enable()
+      -- because the native API (Neovim 0.12+) doesn't fully work on 0.11.x.
+      -- lspconfig provides default cmd paths, filetypes, and root_dir detection
+      -- that the native API doesn't include yet. When you upgrade to 0.12+,
+      -- you can switch to vim.lsp.config(name, server) + vim.lsp.enable(name).
+      local lspconfig = require 'lspconfig'
+      local configs = require 'lspconfig.configs'
+
+      if not configs.tsgo then
+        configs.tsgo = {
+          default_config = {
+            cmd = { 'tsgo', '--lsp', '--stdio' },
+            filetypes = { 'javascript', 'javascriptreact', 'javascript.jsx', 'typescript', 'typescriptreact', 'typescript.tsx' },
+            root_dir = lspconfig.util.root_pattern('tsconfig.json', 'jsconfig.json', 'package.json', '.git'),
+          },
+        }
       end
 
-      -- Special Lua Config, as recommended by neovim help docs
-      vim.lsp.config('lua_ls', {
+      local ts_lsp_active = 'tsgo'
+
+      for name, server in pairs(servers) do
+        server.capabilities = vim.tbl_deep_extend('force', {}, capabilities, server.capabilities or {})
+        if name == 'ts_ls' then
+          server.autostart = false
+        end
+        lspconfig[name].setup(server)
+      end
+
+      lspconfig.tsgo.setup { capabilities = capabilities }
+
+      vim.keymap.set('n', '<leader>lt', function()
+        local ts_ft = { 'javascript', 'javascriptreact', 'typescript', 'typescriptreact' }
+        if ts_lsp_active == 'tsgo' then
+          vim.lsp.stop_client(vim.lsp.get_clients { name = 'tsgo' })
+          ts_lsp_active = 'ts_ls'
+          for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.tbl_contains(ts_ft, vim.bo[buf].filetype) and vim.api.nvim_buf_is_loaded(buf) then
+              vim.api.nvim_buf_call(buf, function() vim.cmd('LspStart ts_ls') end)
+            end
+          end
+          vim.notify('Switched to ts_ls', vim.log.levels.INFO)
+        else
+          vim.lsp.stop_client(vim.lsp.get_clients { name = 'ts_ls' })
+          ts_lsp_active = 'tsgo'
+          for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.tbl_contains(ts_ft, vim.bo[buf].filetype) and vim.api.nvim_buf_is_loaded(buf) then
+              vim.api.nvim_buf_call(buf, function() vim.cmd('LspStart tsgo') end)
+            end
+          end
+          vim.notify('Switched to tsgo', vim.log.levels.INFO)
+        end
+      end, { desc = 'Toggle tsgo / ts_ls' })
+
+      lspconfig.lua_ls.setup {
+        capabilities = capabilities,
         on_init = function(client)
           if client.workspace_folders then
             local path = client.workspace_folders[1].name
@@ -642,8 +735,6 @@ require('lazy').setup({
             },
             workspace = {
               checkThirdParty = false,
-              -- NOTE: this is a lot slower and will cause issues when working on your own configuration.
-              --  See https://github.com/neovim/nvim-lspconfig/issues/3189
               library = vim.api.nvim_get_runtime_file('', true),
             },
           })
@@ -651,8 +742,7 @@ require('lazy').setup({
         settings = {
           Lua = {},
         },
-      })
-      vim.lsp.enable 'lua_ls'
+      }
     end,
   },
 
@@ -686,11 +776,23 @@ require('lazy').setup({
       end,
       formatters_by_ft = {
         lua = { 'stylua' },
-        -- Conform can also run multiple formatters sequentially
-        -- python = { "isort", "black" },
-        --
-        -- You can use 'stop_after_first' to run the first available formatter from the list
-        -- javascript = { "prettierd", "prettier", stop_after_first = true },
+        go = { 'goimports' },
+        rust = { lsp_format = 'prefer' },
+        javascript = { 'biome-check', 'prettierd', 'prettier', stop_after_first = true },
+        javascriptreact = { 'biome-check', 'prettierd', 'prettier', stop_after_first = true },
+        typescript = { 'biome-check', 'prettierd', 'prettier', stop_after_first = true },
+        typescriptreact = { 'biome-check', 'prettierd', 'prettier', stop_after_first = true },
+        json = { 'biome-check', 'prettierd', 'prettier', stop_after_first = true },
+        jsonc = { 'biome-check', 'prettierd', 'prettier', stop_after_first = true },
+        css = { 'prettierd', 'prettier', stop_after_first = true },
+      },
+      formatters = {
+        ['biome-check'] = {
+          require_cwd = true,
+          cwd = function(self, ctx)
+            return require('conform.util').root_file({ 'biome.json', 'biome.jsonc' })(self, ctx)
+          end,
+        },
       },
     },
   },
@@ -757,9 +859,8 @@ require('lazy').setup({
       },
 
       appearance = {
-        -- 'mono' (default) for 'Nerd Font Mono' or 'normal' for 'Nerd Font'
-        -- Adjusts spacing to ensure icons are aligned
         nerd_font_variant = 'mono',
+        use_nvim_cmp_as_default = false,
       },
 
       completion = {
@@ -788,25 +889,43 @@ require('lazy').setup({
     },
   },
 
-  { -- You can easily change to a different colorscheme.
-    -- Change the name of the colorscheme plugin below, and then
-    -- change the command in the config to whatever the name of that colorscheme is.
-    --
-    -- If you want to see what colorschemes are already installed, you can use `:Telescope colorscheme`.
-    'folke/tokyonight.nvim',
-    priority = 1000, -- Make sure to load this before all the other start plugins.
+  -- Dark theme (default). Loads on startup.
+  -- Other variants: monoglow-z, monoglow-lack, monoglow-void, monoglow-light
+  -- Switch with :colorscheme monoglow-z etc.
+  {
+    'wnkz/monoglow.nvim',
+    lazy = false,
+    priority = 1000,
+    opts = {},
     config = function()
-      ---@diagnostic disable-next-line: missing-fields
-      require('tokyonight').setup {
+      require('monoglow').setup {}
+      vim.cmd.colorscheme 'monoglow'
+    end,
+  },
+
+  -- Light themes from the ef-themes collection (ported from Emacs).
+  -- Lazy-loaded: only loads when you run :colorscheme ef-spring (or any ef-* theme).
+  -- Available light themes: ef-spring, ef-day, ef-light, ef-frost, ef-cyprus, etc.
+  -- Available dark themes: ef-winter, ef-night, ef-dark, ef-dream, ef-owl, etc.
+  -- Full list: https://github.com/oonamo/ef-themes.nvim
+  {
+    'oonamo/ef-themes.nvim',
+    lazy = true,
+    config = function()
+      require('ef-themes').setup {
+        light = 'ef-spring',
+        dark = 'ef-winter',
+        transparent = false,
         styles = {
-          comments = { italic = false }, -- Disable italics in comments
+          comments = { italic = true },
+          keywords = { bold = true },
+        },
+        modules = {
+          blink = true,
+          snacks = true,
+          treesitter = true,
         },
       }
-
-      -- Load the colorscheme here.
-      -- Like many other themes, this one has different styles, and you could load
-      -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
-      vim.cmd.colorscheme 'tokyonight-night'
     end,
   },
 
@@ -849,16 +968,21 @@ require('lazy').setup({
     end,
   },
 
+  -- Treesitter provides syntax highlighting, indentation, and code understanding.
+  -- GOTCHA: This is NOT an LSP -- treesitter parses the syntax tree locally.
+  -- LSP provides go-to-definition, refactoring, etc. Treesitter provides colors.
+  -- auto_install = true will install parsers for any filetype you open.
+  -- build = ':TSUpdate' keeps parsers updated when the plugin updates.
   { -- Highlight, edit, and navigate code
     'nvim-treesitter/nvim-treesitter',
-    config = function()
-      local filetypes = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' }
-      require('nvim-treesitter').install(filetypes)
-      vim.api.nvim_create_autocmd('FileType', {
-        pattern = filetypes,
-        callback = function() vim.treesitter.start() end,
-      })
-    end,
+    build = ':TSUpdate',
+    main = 'nvim-treesitter.configs',
+    opts = {
+      ensure_installed = { 'bash', 'c', 'css', 'diff', 'go', 'gomod', 'gosum', 'html', 'javascript', 'json', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'rust', 'toml', 'tsx', 'typescript', 'vim', 'vimdoc', 'yaml' },
+      auto_install = true,
+      highlight = { enable = true },
+      indent = { enable = true },
+    },
   },
 
   -- The following comments only work if you have downloaded the kickstart repo, not just copy pasted the
@@ -875,19 +999,21 @@ require('lazy').setup({
   -- require 'kickstart.plugins.lint',
   -- require 'kickstart.plugins.autopairs',
   -- require 'kickstart.plugins.neo-tree',
-  -- require 'kickstart.plugins.gitsigns', -- adds gitsigns recommend keymaps
+  require 'kickstart.plugins.gitsigns',
 
   -- NOTE: The import below can automatically add your own plugins, configuration, etc from `lua/custom/plugins/*.lua`
   --    This is the easiest way to modularize your config.
   --
-  --  Uncomment the following line and add your plugins to `lua/custom/plugins/*.lua` to get going.
-  -- { import = 'custom.plugins' },
+  { import = 'custom.plugins' },
   --
   -- For additional information with loading, sourcing and examples see `:help lazy.nvim-🔌-plugin-spec`
   -- Or use telescope!
   -- In normal mode type `<space>sh` then write `lazy.nvim-plugin`
   -- you can continue same window with `<space>sr` which resumes last telescope search
 }, {
+  git = {
+    filter = true,
+  },
   ui = {
     -- If you are using a Nerd Font: set icons to an empty table which will use the
     -- default lazy.nvim defined Nerd Font icons, otherwise define a unicode icons table
